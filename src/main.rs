@@ -1,14 +1,13 @@
-use nix::NixPath;
 use tokio::net::unix::pipe::OpenOptions;
-
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
 use std::io;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
-use tempfile::tempdir;
 use prost::Message;
 use std::io::Cursor;
+use home::home_dir;
 
 pub mod raw_packet {
     include!(concat!(env!("OUT_DIR"), "/pipe_rs.raw_packet.rs"));
@@ -26,21 +25,36 @@ pub fn deserialize_packet(buf: &[u8]) -> Result<raw_packet::Packet, prost::Decod
     raw_packet::Packet::decode(&mut Cursor::new(buf))
 }
 
+
+pub fn copy_dir(src: &Path, dst: &Path) -> io::Result<()> {
+    for entry in src.read_dir()? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            fs::create_dir_all(&dst_path)?;
+            copy_dir(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let temp_dir = tempdir().unwrap();
-    let fifo_path = Path::new("/Users/emanuelemicheletti/Downloads/test.pipe");
-    //let fifo_path = temp_dir.path().join("test.pipe");
-    
+    let home_dir = home_dir().unwrap();
+    let fifo_path = Path::new(&home_dir).join("Downloads/packets.pipe");
+    let executable_path = "/Applications/MitmproxyAppleTunnel.app/";
+    copy_dir(Path::new("./MitmproxyAppleTunnel.app/"), Path::new(executable_path))?;
 
     // create new fifo and give read, write and execute rights to the owner
-    match mkfifo(fifo_path, Mode::S_IRWXU) {
+    match mkfifo(&fifo_path, Mode::S_IRWXU) {
         Ok(_) => println!("created {:?}", fifo_path),
         Err(err) => println!("Error creating fifo: {}", err),
     }
 
-    // now open the app and pass the fifo_path as arg
-    let executable_path = "/Applications/MitmproxyAppleTunnel.app/";
     Command::new("open")
         .arg("-a")
         .arg(executable_path)
